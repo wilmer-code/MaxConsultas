@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Max Consulta · Asistente Max</title>
+
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="./styles.css?v=20260216-final-19" />
+  <script src="./app.js?v=20260216-final" defer></script>
+</head>
+
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-label="Max Consulta">
+          <svg viewBox="0 0 48 48" aria-hidden="true">
+            <!-- M azul -->
+            <path fill="currentColor" d="M12 34V14c0-1 .8-2 2-2h3l7 11 7-11h3c1.2 0 2 .9 2 2v20c0 1.1-.9 2-2 2h-3V22.7l-6 9.4c-.4.6-1 .9-1.7.9s-1.3-.3-1.7-.9l-6-9.4V36h-3c-1.1 0-2-.9-2-2z"/>
+
+            <!-- Franja blanca (única) -->
+            <rect
+              x="25.5" y="10"
+              width="3.5" height="25"
+              rx="6"
+              fill="#ffffff"
+              opacity="0.78"
+              transform="rotate(32 31 24)"
+            />
+          </svg>
+        </div>
+
+        <div class="brand-text">
+          <div class="brand-name">Max Consulta</div>
+          <div class="brand-sub">maxconsulta.com · acceso con PIN</div>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <span class="status-pill" title="Estado de sesión">
+          <span class="dot"></span>
+          Conectado
+        </span>
+
+        <button class="icon-btn" id="btnSettings" title="Ajustes">⚙︎</button>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="filters card">
+        <div class="filters-row">
+          <span class="filters-label">Área</span>
+
+          <div class="segmented segmented-area" role="tablist" aria-label="Área">
+            <button class="seg-btn active" data-collection="" type="button">Todas</button>
+            <button class="seg-btn" data-collection="laboral" type="button">Laboral</button>
+            <button class="seg-btn" data-collection="fiscal" type="button">Fiscal</button>
+            <button class="seg-btn" data-collection="seguridad_social" type="button">Seg. Social</button>
+            <button class="seg-btn" data-collection="BOCM" type="button">BOCM</button>
+            <button class="seg-btn" data-collection="Estatuto_trabajadores" type="button">Estatuto</button>
+            <button class="seg-btn" data-collection="Convenios_Madrid" type="button">Convenios_Madrid</button>
+          </div>
+
+          <div class="select-group is-hidden">
+            <label for="mode">Tipo</label>
+            <select id="mode">
+              <option value="respuesta">Respuesta</option>
+              <option value="resumen">Resumen</option>
+              <option value="completa">Completa</option>
+              <option value="paso_a_paso" selected>Paso a paso</option>
+            </select>
+          </div>
+
+          <div class="select-group">
+            <label for="tone">Tono</label>
+            <select id="tone">
+              <option value="neutro" selected>Neutro</option>
+              <option value="formal">Formal</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="filters-row filters-row-2">
+          <div class="segmented segmented-mode" role="tablist" aria-label="Formato de respuesta">
+            <button class="seg-btn seg-mode" data-mode="respuesta" type="button">Respuesta</button>
+            <button class="seg-btn seg-mode" data-mode="resumen" type="button">Resumen</button>
+            <button class="seg-btn seg-mode" data-mode="completa" type="button">Completa</button>
+            <button class="seg-btn seg-mode active" data-mode="paso_a_paso" type="button">Paso a paso</button>
+          </div>
+
+          <div class="filters-right">
+            <button class="icon-btn" id="btnClear" title="Limpiar">Limpiar</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2 class="card-title">Escribe tu consulta</h2>
+
+          <textarea id="q" placeholder="Escribe tu pregunta aquí…"></textarea>
+
+          <div class="cta-row">
+            <button class="primary" id="btnAsk">Consultar</button>
+            <span class="hint">Ejemplos: nóminas, contratos, IRPF, altas autónomo…</span>
+          </div>
+
+          <div class="meta-row">
+            <span class="muted">API: <span id="apiLabel">—</span></span>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="answer-head">
+            <h2 class="card-title">Respuesta</h2>
+            <div class="answer-actions">
+              <button class="ghost" id="btnCopy">Copiar respuesta</button>
+              <button class="ghost" id="btnToggleSources" aria-expanded="false">Ver fuentes</button>
+            </div>
+          </div>
+
+          <div class="answer-box" id="out">—</div>
+
+          <div class="sources" id="sourcesWrap" hidden>
+            <div class="sources-title">Fuentes</div>
+            <div id="sourcesList" class="sources-list"></div>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <dialog id="settingsModal" class="modal">
+      <div class="modal-head">
+        <div class="modal-title">Ajustes</div>
+        <button class="icon-btn" id="btnCloseSettings">Cerrar</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="field">
+          <label for="topk">Top K (avanzado)</label>
+          <input id="topk" type="number" value="6" min="1" max="15" />
+          <p class="muted">Por defecto 6. Si no quieres tocarlo nunca, lo dejamos fijo y oculto.</p>
+        </div>
+      </div>
+    </dialog>
+
+    <footer class="footer">
+      <span class="muted">Asistente Max · uso interno</span>
+    </footer>
+  </div>
+</body>
+</html>

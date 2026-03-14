@@ -1,0 +1,860 @@
+:root{
+  --bg: #f4f6fb;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --line: rgba(15, 23, 42, 0.10);
+  --shadow: 0 10px 30px rgba(2, 8, 23, 0.08);
+  --radius: 16px;
+
+  --brand: #2563eb;
+  --brand-2: #1d4ed8;
+
+  --chip: rgba(37, 99, 235, 0.10);
+
+  /* 🔧 CONTROLES (fácil de ajustar) */
+  --verifyW: 18px;   /* ancho del escudo */
+  --verifyH: 18px;   /* alto del escudo */
+  --gearSize: 24px;  /* tamaño del engranaje */
+}
+
+/* ---------- Reset / base ---------- */
+*{ box-sizing: border-box; }
+html,body{ height:100%; }
+
+body{
+  margin:0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+  color: var(--text);
+  background:
+    radial-gradient(900px 520px at 12% 8%, rgba(37,99,235,.14), transparent 60%),
+    radial-gradient(900px 520px at 82% 0%, rgba(99,102,241,.12), transparent 60%),
+    var(--bg);
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Quitar estilos nativos feos (Safari sobre todo) */
+button, input, select, textarea{
+  font: inherit;
+  color: inherit;
+}
+button{
+  -webkit-appearance: none;
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+}
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible{
+  outline: none;
+}
+
+/* ---------- Layout ---------- */
+.app-shell{
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 26px 22px 18px;
+}
+
+.topbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.72);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.brand{ display:flex; align-items:center; gap:10px; }
+.brand-text{ display:flex; flex-direction:column; line-height:1.1; }
+
+.brand-name{
+  font-weight: 900;
+  font-size: 19px;
+  letter-spacing: -0.4px;
+  line-height: 1.05;
+}
+.brand-sub{
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top:4px;
+  letter-spacing: -0.1px;
+}
+
+/* ==================================================
+   LOGO (ÚNICA DEFINICIÓN) -> franja SOLO en el SVG
+   ================================================== */
+.logo{
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 0;
+  flex: 0 0 auto;
+
+  color: var(--brand);
+  filter: drop-shadow(0 6px 14px rgba(37,99,235,.18));
+
+  position: relative;
+  overflow: visible;
+}
+
+/* CORTAFUEGOS DEFINITIVO: si existe CSS viejo con ::after/::before, lo matamos */
+.logo::after,
+.logo::before{
+  content: none !important;
+  display: none !important;
+}
+
+.logo svg{
+  display:block;
+  width: 52px !important;
+  height: 52px !important;
+  filter: none !important;
+}
+
+/* ---------- Topbar actions ---------- */
+.topbar-actions{ display:flex; align-items:center; gap:10px; }
+
+.status-pill{
+  display:inline-flex; align-items:center; gap:8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.95);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+.status-pill .dot{
+  width:10px; height:10px; border-radius:50%;
+  background:#16a34a;
+  box-shadow: 0 0 0 3px rgba(22,163,74,.12);
+}
+
+.icon-btn{
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.95);
+  padding: 8px 12px;
+  border-radius: 12px;
+  cursor:pointer;
+  font-weight: 800;
+
+  box-shadow: 0 8px 18px rgba(2,8,23,.06);
+  transition: transform .08s ease, filter .12s ease, box-shadow .12s ease;
+}
+.icon-btn:hover{
+  filter: brightness(0.985);
+  box-shadow: 0 10px 22px rgba(2,8,23,.08);
+}
+.icon-btn:active{ transform: translateY(1px); }
+
+/* ---------- Content ---------- */
+.content{ margin-top: 16px; }
+.filters.card{ margin-top: 14px; }
+
+.card{
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.86);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+/* ====== FILTROS ====== */
+.filters-row{
+  display:flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items:center;
+  justify-content: flex-start;
+}
+.filters-label{
+  font-weight: 900;
+  color: var(--text);
+  margin-right: 6px;
+}
+.filters-row .select-group:not(.is-hidden){
+  margin-left: auto;
+}
+
+/* ---------- Segmented base ---------- */
+.segmented{
+  display:flex;
+  gap:8px;
+  padding: 6px;
+  background: rgba(15,23,42,0.04);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.seg-btn{
+  border: 0;
+  background: transparent;
+  padding: 9px 12px;
+  border-radius: 999px;
+  cursor:pointer;
+  font-weight: 800;
+  color: var(--muted);
+  transition: background .12s ease, color .12s ease, transform .08s ease;
+}
+.seg-btn:hover{ background: rgba(15,23,42,0.04); }
+.seg-btn:active{ transform: translateY(1px); }
+
+.seg-btn.active{
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  color:#fff;
+  box-shadow: 0 10px 20px rgba(37,99,235,.18);
+}
+
+/* ---------- Selects ---------- */
+.select-group{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.select-group label{
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+select{
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.95);
+  border-radius: 12px;
+  padding: 10px 34px 10px 12px;
+  font-weight: 800;
+  color: var(--text);
+
+  -webkit-appearance: none;
+  appearance: none;
+
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(15,23,42,.55) 50%),
+    linear-gradient(135deg, rgba(15,23,42,.55) 50%, transparent 50%),
+    linear-gradient(to right, transparent, transparent);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 12px) 50%,
+    0 0;
+  background-size: 6px 6px, 6px 6px, 100% 100%;
+  background-repeat: no-repeat;
+
+  box-shadow: 0 8px 16px rgba(2,8,23,.05);
+}
+select:hover{ filter: brightness(0.99); }
+
+/* ---------- Grid ---------- */
+.grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.card-title{
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 950;
+  letter-spacing: -0.2px;
+}
+
+/* ---------- Inputs ---------- */
+textarea{
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  font-size: 14px;
+  background: rgba(255,255,255,0.96);
+}
+textarea:focus{
+  border-color: rgba(37,99,235,0.55);
+  box-shadow: 0 0 0 4px rgba(37,99,235,0.12);
+}
+
+/* ---------- CTA (Botón centrado + ejemplos debajo) ---------- */
+.cta-row{
+  display:flex;
+  flex-direction: column;
+  align-items:center;
+  justify-content:center;
+  gap: 10px;
+  margin-top: 12px;
+  width: 100%;
+}
+
+.cta-row .primary,
+.cta-row #btnAsk{
+  display:block;
+  width: min(360px, 100%);
+  margin: 0 auto;
+}
+
+.cta-row .hint{
+  display:block;
+  width:100%;
+  text-align:center;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* ---------- Botón principal ---------- */
+.primary{
+  border: 0;
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  color:#fff;
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-weight: 950;
+  cursor:pointer;
+  box-shadow: 0 14px 26px rgba(37,99,235,.20);
+  transition: transform .08s ease, filter .12s ease, box-shadow .12s ease;
+}
+.primary:hover{
+  filter: brightness(1.03);
+  box-shadow: 0 16px 30px rgba(37,99,235,.24);
+}
+.primary:active{ transform: translateY(1px); }
+
+.hint{ color: var(--muted); font-size: 13px; }
+
+.meta-row{
+  display:flex;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+.muted{ color: var(--muted); font-size: 12px; }
+
+/* ---------- Answer ---------- */
+.answer-head{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.answer-actions{ display:flex; gap: 8px; flex-wrap: wrap; }
+
+.ghost{
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.95);
+  padding: 9px 12px;
+  border-radius: 12px;
+  cursor:pointer;
+  font-weight: 900;
+  box-shadow: 0 8px 18px rgba(2,8,23,.06);
+  transition: transform .08s ease, filter .12s ease, box-shadow .12s ease;
+}
+.ghost:hover{
+  filter: brightness(0.985);
+  box-shadow: 0 10px 22px rgba(2,8,23,.08);
+}
+.ghost:active{ transform: translateY(1px); }
+
+.answer-box{
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.96);
+  border-radius: 14px;
+  padding: 14px;
+  min-height: 220px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+/* ---------- Sources ---------- */
+.sources{
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.sources-title{
+  font-weight: 950;
+  margin-bottom: 8px;
+}
+pre{
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #0b1220;
+  color: #e5e7eb;
+  padding: 12px;
+  border-radius: 12px;
+  overflow:auto;
+  max-width: 100%;
+}
+
+/* ---------- Footer ---------- */
+.footer{
+  margin-top: 16px;
+  text-align:center;
+  padding: 10px;
+}
+
+/* ---------- Modal ---------- */
+.modal{
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 0;
+  width: min(520px, 92vw);
+  box-shadow: var(--shadow);
+}
+.modal::backdrop{ background: rgba(2,8,23,0.35); }
+.modal-head{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  padding: 14px 14px;
+  border-bottom: 1px solid var(--line);
+  background:#fff;
+}
+.modal-title{ font-weight: 950; }
+
+/* =========================================================
+   FILA 2 + FUENTES EN CARDS + ÁREA/MODO “BARRA”
+   ========================================================= */
+.filters-row-2{
+  margin-top: 10px;
+  justify-content: space-between;
+  align-items: center;
+}
+.filters-right{
+  display:flex;
+  align-items:center;
+  gap: 12px;
+}
+#btnClear{
+  padding: 10px 14px;
+  border-radius: 14px;
+}
+
+.sources-list{
+  display:flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.source-card{
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.96);
+  border-radius: 14px;
+  padding: 12px;
+}
+.source-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.source-title{
+  font-weight: 950;
+  font-size: 13px;
+  line-height: 1.2;
+}
+.source-meta{
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.source-snippet{
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.source-actions{
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.source-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(15,23,42,0.03);
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.source-actions .ghost{
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+
+.select-group.is-hidden{
+  display: none !important;
+}
+
+.segmented-area{
+  border-radius: 14px;
+  padding: 6px;
+  background: rgba(255,255,255,0.75);
+  border: 1px solid var(--line);
+  gap: 6px;
+}
+.segmented-area .seg-btn{
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: transparent;
+}
+.segmented-area .seg-btn:hover{ background: rgba(15,23,42,0.04); }
+.segmented-area .seg-btn.active{
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  color:#fff;
+  box-shadow: 0 10px 20px rgba(37,99,235,.18);
+}
+
+.segmented-mode{
+  background: rgba(255,255,255,0.75);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 6px;
+  gap: 6px;
+}
+.segmented-mode .seg-btn{
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: transparent;
+}
+.segmented-mode .seg-btn:hover{ background: rgba(15,23,42,0.04); }
+.segmented-mode .seg-btn.active{
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  color:#fff;
+  box-shadow: 0 10px 20px rgba(37,99,235,.18);
+}
+
+/* =========================================================
+   RESPONSIVE EXISTENTE
+   ========================================================= */
+@media (max-width: 900px){
+  .grid{ grid-template-columns: 1fr; }
+  .filters-row-2{
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .filters-right{ justify-content: flex-end; }
+  .filters-row .select-group:not(.is-hidden){ margin-left: 0; }
+}
+
+/* =========================================================
+   ✅ RESPONSIVE MÓVIL + ESTILO MOCKUP (oscuro SOLO en móvil)
+   + FIX OVERFLOW HORIZONTAL (NO SCROLL LATERAL)
+   ========================================================= */
+@media (max-width: 520px){
+
+  /* 🔥 FIX PRINCIPAL: evita scroll lateral del documento */
+  html, body{
+    overflow-x: hidden;
+    max-width: 100%;
+  }
+
+  /* Asegura que nada “empuje” el ancho (flex children) */
+  .topbar, .filters-row, .filters-row-2, .answer-head{
+    min-width: 0;
+  }
+  .topbar > *, .filters-row > *, .filters-row-2 > *, .answer-head > *{
+    min-width: 0;
+  }
+
+  /* 1) Cambiamos “tema” en móvil sin tocar desktop */
+  body{
+    color: #e5e7eb;
+    background:
+      radial-gradient(900px 520px at 20% 10%, rgba(59,130,246,.22), transparent 60%),
+      radial-gradient(900px 520px at 85% 0%, rgba(99,102,241,.18), transparent 60%),
+      linear-gradient(180deg, #0b1220 0%, #0a1020 60%, #070b14 100%);
+  }
+
+  /* Variables locales (solo móvil) */
+  :root{
+    --line: rgba(255,255,255,0.10);
+    --muted: rgba(255,255,255,0.62);
+    --shadow: 0 16px 40px rgba(0,0,0,0.35);
+  }
+
+  .app-shell{
+    padding: 14px 12px 14px;
+    max-width: 100%;
+  }
+
+  /* 2) Topbar tipo mockup (glass oscuro, compacto) */
+  .topbar{
+    padding: 12px 12px;
+    gap: 10px;
+    border-radius: 16px;
+    background: rgba(17, 24, 39, 0.55);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 18px 40px rgba(0,0,0,.35);
+    max-width: 100%;
+  }
+
+  .brand-name{ font-size: 18px; color:#f3f4f6; }
+  .brand-sub{ font-size: 12px; color: rgba(255,255,255,0.55); }
+
+  .logo svg{
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  .topbar-actions{
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* 2.1) FIX: FILA “Área / Tono” en columna (evita desbordes) */
+  .filters-row{
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+  .filters-label{
+    margin-right: 0;
+  }
+  .filters-row .select-group:not(.is-hidden){
+    margin-left: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  /* 2.2) FIX: FILA 2 también en columna */
+  .filters-row-2{
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .filters-right{
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+    /* Grupo Tono: que no se estire y quede compacto */
+    .filters-row .select-group{
+      justify-content: flex-start;
+      gap: 10px;
+    }
+  
+    .filters-row .select-group label{
+      color: rgba(255,255,255,0.65);
+      font-weight: 800;
+    }
+
+  /* 3) Cards “glass” oscuro como mockup */
+  .card{
+    border-radius: 18px;
+    padding: 14px;
+    background: rgba(17, 24, 39, 0.55);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 18px 40px rgba(0,0,0,.32);
+    max-width: 100%;
+  }
+
+  .card-title{ color:#f3f4f6; }
+
+  /* 4) Segmented en móvil -> scroll horizontal INTERNO (no del body) */
+  .segmented,
+  .segmented-area,
+  .segmented-mode{
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 14px;
+  }
+  .segmented::-webkit-scrollbar,
+  .segmented-area::-webkit-scrollbar,
+  .segmented-mode::-webkit-scrollbar{
+    display:none;
+  }
+
+  .seg-btn{
+    white-space: nowrap;
+    flex: 0 0 auto;
+    color: rgba(255,255,255,0.70);
+  }
+  .seg-btn:hover{ background: rgba(255,255,255,0.06); }
+
+  /* 5) Inputs oscuros */
+  textarea{
+    min-height: 110px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    color: #e5e7eb;
+  }
+  textarea::placeholder{
+    color: rgba(255,255,255,0.45);
+  }
+  textarea:focus{
+    border-color: rgba(37,99,235,0.75);
+    box-shadow: 0 0 0 4px rgba(37,99,235,0.18);
+  }
+
+  /* 6) Select (Tono) - pill oscuro, más pequeño y sin “artefactos” en iOS */
+  select{
+    width: auto;              /* <-- ya no ocupa toda la fila */
+    max-width: 220px;
+    min-width: 150px;
+
+    padding: 10px 12px;
+    border-radius: 14px;
+
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #e5e7eb;
+
+    box-shadow: none;         /* más “pro” y limpio en móvil */
+    background-image: none !important; /* <-- quita el caret por gradients (evita la X rara) */
+
+    -webkit-appearance: menulist;
+    appearance: menulist;
+  }
+
+  /* 7) Botón a full en móvil */
+  .cta-row .primary,
+  .cta-row #btnAsk{
+    width: 100%;
+  }
+
+  .hint{ color: rgba(255,255,255,0.55); }
+
+  /* 8) Caja de respuesta en oscuro */
+  .answer-box{
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    color: #e5e7eb;
+    max-width: 100%;
+  }
+
+  /* 9) Acciones de respuesta: en columna si no caben */
+  .answer-head{
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .answer-actions{
+    justify-content: flex-start;
+  }
+
+  .ghost{
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    color: #e5e7eb;
+  }
+
+  .source-card{
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+  }
+    /* ✅ Botón Limpiar en móvil (oscuro + texto visible) */
+    #btnClear{
+      background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: #e5e7eb;              /* texto claro (recomendado en tema oscuro) */
+      font-weight: 900;
+      box-shadow: none;
+    }
+  
+    #btnClear:hover{
+      background: rgba(255,255,255,0.14);
+    }
+  
+    #btnClear:active{
+      transform: translateY(1px);
+    }
+  
+    /* Si está deshabilitado, que no se vea “lavado” */
+    #btnClear:disabled{
+      opacity: 0.55;
+      color: #e5e7eb;
+    }
+}
+/* ====== CORTAFUEGOS DEFINITIVO: mata cualquier franja extra del logo ====== */
+.logo::before,
+.logo::after{
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  border: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+.logo svg *{
+  filter: none !important;
+}
+
+/* =========================================================
+   ✅ TOPBAR (FINAL ÚNICO): escudo-verificado + engranaje sin caja
+   ========================================================= */
+
+/* Pastilla "Conectado" (rectangular suave) */
+.topbar .topbar-actions .status-pill{
+  border-radius: 12px !important;
+  padding: 8px 12px !important;
+  font-weight: 800 !important;
+}
+
+/* Quitar el dot */
+.topbar .topbar-actions .status-pill .dot{
+  display: none !important;
+}
+
+/* Escudo verde + check blanco */
+.topbar .topbar-actions .status-pill::before{
+  content: "" !important;
+  display: inline-block !important;
+  width: var(--verifyW) !important;
+  height: var(--verifyH) !important;
+  margin-right: 8px !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  background-size: contain !important;
+
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%2316a34a' d='M12 2l7 4v6c0 5-3 9-7 10C8 21 5 17 5 12V6l7-4z'/%3E%3Cpath fill='white' d='M10.2 12.7l-1.4-1.4-1.4 1.4 2.8 2.8 6-6-1.4-1.4-4.6 4.6z'/%3E%3C/svg%3E") !important;
+}
+
+/* Engranaje SIN caja */
+.topbar .topbar-actions #btnSettings.icon-btn{
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+
+  padding: 4px 6px !important;
+  width: auto !important;
+  height: auto !important;
+
+  font-size: var(--gearSize) !important;
+  line-height: 1 !important;
+  color: var(--muted) !important;
+}
+.topbar .topbar-actions #btnSettings.icon-btn:hover{
+  filter: brightness(0.9) !important;
+}
