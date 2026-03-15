@@ -50,12 +50,13 @@
     els.msg.value = "";
     render();
 
+    // placeholder
+    history.push({ role: "assistant", content: "Pensando…" });
+    render();
+
     const question = buildPrompt(text);
     const collection = selectedCollection ? selectedCollection : null;
     const top_k = 6;
-
-    history.push({ role: "assistant", content: "Pensando…" });
-    render();
 
     try {
       const res = await fetch(`${API}/ask`, {
@@ -76,8 +77,7 @@
         return;
       }
 
-      const answer = (data.answer || "Sin respuesta").trim();
-      history.push({ role: "assistant", content: answer });
+      history.push({ role: "assistant", content: (data.answer || "Sin respuesta").trim() });
       render();
 
     } catch (e) {
