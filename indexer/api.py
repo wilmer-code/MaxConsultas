@@ -535,9 +535,31 @@ def chat(inp: ChatIn):
     best_similarity = _best_similarity(sources)
     sources_count = len(sources)
     answer_len = len(rag_answer or "")
-    rag_sufficient = (sources_count >= 2 and best_similarity >= 0.72) or (
+    rag_sufficient_base = (sources_count >= 2 and best_similarity >= 0.72) or (
         answer_len >= 400 and sources_count >= 1
     )
+
+    ql = question.lower()
+    needs_official_lookup = any(k in ql for k in [
+        "texto exacto",
+        "publicado hoy",
+        "hoy en el boe",
+        "boe de hoy",
+        "enlace oficial",
+        "dame enlace",
+        "dame el enlace",
+        "última publicación",
+        "ultima publicacion",
+        "vigente hoy",
+    ])
+
+    provided_url_pre = (inp.url or _extract_url(question) or "").strip() or None
+    if inp.internet and not provided_url_pre and needs_official_lookup and best_similarity < 0.72:
+        rag_sufficient = False
+        rag_override_reason = "needs_official_lookup_low_similarity"
+    else:
+        rag_sufficient = rag_sufficient_base
+        rag_override_reason = None
 
     internet_used = False
     internet_reason = "internet_disabled"
@@ -546,7 +568,7 @@ def chat(inp: ChatIn):
     answer = rag_answer
 
     if inp.internet:
-        provided_url = (inp.url or _extract_url(question) or "").strip() or None
+        provided_url = provided_url_pre
         if rag_sufficient:
             internet_reason = "rag_sufficient"
         elif provided_url and not _is_allowed_url(provided_url):
@@ -607,6 +629,7 @@ def chat(inp: ChatIn):
         "internet_used": internet_used,
         "internet_reason": internet_reason,
         "internet_sources": internet_sources,
+        "rag_override_reason": rag_override_reason,
         "needs_data": needs_data,
         "fields_required": missing,
         "can_generate_doc": can_generate_doc,
