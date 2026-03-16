@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Max Consulta · Chat</title>
   <link rel="icon" href="/favicon.ico">
-  <link rel="stylesheet" href="./styles.css?v=20260315-chat-2" />
-  <script src="./chat.js?v=20260315-chat-2" defer></script>
+  <link rel="stylesheet" href="./styles.css?v=20260316-chat-templates" />
+  <script src="./chat.js?v=20260316-chat-templates" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -53,6 +53,32 @@
             </select>
           </div>
         </div>
+
+        <div class="filters-row" style="margin-top:10px;">
+          <label class="checkbox-inline">
+            <input type="checkbox" id="internetFallback" /> Internet fallback
+          </label>
+          <input id="explicitUrl" class="inline-input" placeholder="URL oficial (allowlist) opcional" />
+        </div>
+
+        <div class="filters-row" style="margin-top:10px;">
+          <div class="select-group">
+            <label for="templateKind">Tipo</label>
+            <select id="templateKind">
+              <option value="none" selected>Ninguno</option>
+              <option value="docx">DOCX</option>
+              <option value="xlsx">XLSX</option>
+            </select>
+          </div>
+          <div class="select-group" style="min-width:280px;">
+            <label for="templateSelect">Plantilla</label>
+            <select id="templateSelect">
+              <option value="">Selecciona plantilla</option>
+            </select>
+          </div>
+          <button class="ghost" id="btnGenerate" type="button">Generar</button>
+          <span id="genResult" class="muted"></span>
+        </div>
       </section>
 
       <section class="grid">
@@ -67,7 +93,7 @@
           <div class="cta-row" style="align-items: stretch;">
             <textarea id="msg" placeholder="Escribe tu mensaje… (Ctrl/Cmd + Enter para enviar)"></textarea>
             <button class="primary" id="btnSend">Enviar</button>
-            <span class="hint">Este chat usa la documentación indexada y mantiene contexto en esta sesión.</span>
+            <span class="hint">RAG primero. Internet solo fallback con URL oficial allowlist.</span>
           </div>
         </article>
       </section>

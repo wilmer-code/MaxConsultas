@@ -2,3 +2,6 @@ fastapi
 uvicorn
 python-dotenv
 python-docx
+openpyxl
+requests
+beautifulsoup4

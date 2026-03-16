@@ -797,6 +797,26 @@ pre{
       color: #e5e7eb;
     }
 }
+.checkbox-inline{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  font-weight:700;
+}
+
+.inline-input{
+  min-width: 320px;
+  max-width: 100%;
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:10px 12px;
+  background: rgba(255,255,255,0.95);
+}
+
+#genResult a{
+  font-weight:700;
+}
+
 /* ====== CORTAFUEGOS DEFINITIVO: mata cualquier franja extra del logo ====== */
 .logo::before,
 .logo::after{

@@ -8,41 +8,96 @@
     btnSend: document.getElementById("btnSend"),
     btnNewChat: document.getElementById("btnNewChat"),
     tone: document.getElementById("tone"),
+    internetFallback: document.getElementById("internetFallback"),
+    explicitUrl: document.getElementById("explicitUrl"),
+    templateKind: document.getElementById("templateKind"),
+    templateSelect: document.getElementById("templateSelect"),
+    btnGenerate: document.getElementById("btnGenerate"),
+    genResult: document.getElementById("genResult"),
   };
 
   if (els.apiLabel) els.apiLabel.textContent = API;
 
-  let selectedCollection = ""; // "" = todas
-  const history = []; // {role:"user"|"assistant", content:string}
+  let selectedCollection = "";
+  const history = [];
+  const templates = { docx: [], xlsx: [] };
+  let lastChatPayload = null;
 
-  document.querySelectorAll(".seg-btn[data-collection]").forEach(btn => {
+  document.querySelectorAll(".seg-btn[data-collection]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".seg-btn[data-collection]").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".seg-btn[data-collection]").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       selectedCollection = btn.dataset.collection || "";
     });
   });
 
   function render() {
-    const lines = history.map(h => {
+    const lines = history.map((h) => {
       const who = h.role === "user" ? "Tú" : "Asistente";
-      return `【${who}】\n${h.content}\n`;
+      const meta = h.meta ? `\n${h.meta}` : "";
+      return `【${who}】\n${h.content}${meta}\n`;
     });
     els.chatLog.textContent = lines.join("\n");
     els.chatLog.scrollTop = els.chatLog.scrollHeight;
   }
 
-  function buildPrompt(userText) {
+  async function loadTemplates() {
+    try {
+      const [docxRes, xlsxRes] = await Promise.all([
+        fetch(`${API}/documents/templates`),
+        fetch(`${API}/spreadsheets/templates`),
+      ]);
+
+      templates.docx = docxRes.ok ? await docxRes.json() : [];
+      templates.xlsx = xlsxRes.ok ? await xlsxRes.json() : [];
+      fillTemplateSelect();
+    } catch {
+      templates.docx = [];
+      templates.xlsx = [];
+      fillTemplateSelect();
+    }
+  }
+
+  function fillTemplateSelect() {
+    const kind = els.templateKind?.value || "none";
+    els.templateSelect.innerHTML = "";
+
+    const optNone = document.createElement("option");
+    optNone.value = "";
+    optNone.textContent = "Selecciona plantilla";
+    els.templateSelect.appendChild(optNone);
+
+    if (kind === "docx") {
+      templates.docx.forEach((t) => {
+        const o = document.createElement("option");
+        o.value = t.id;
+        o.textContent = t.title;
+        els.templateSelect.appendChild(o);
+      });
+    } else if (kind === "xlsx") {
+      templates.xlsx.forEach((t) => {
+        const o = document.createElement("option");
+        o.value = t.id;
+        o.textContent = t.title;
+        els.templateSelect.appendChild(o);
+      });
+    }
+  }
+
+  function buildPayload(userText) {
     const tone = els.tone?.value || "neutro";
-    const toneText = tone === "formal"
-      ? "Mantén tono formal, profesional y propio de gestoría."
-      : "Mantén tono neutro, profesional y cercano.";
+    const internet = !!els.internetFallback?.checked;
+    const explicitUrl = (els.explicitUrl?.value || "").trim();
+    const mergedMessage = explicitUrl ? `${userText}\nURL: ${explicitUrl}` : userText;
 
-    const recent = history.slice(-10)
-      .map(h => `${h.role.toUpperCase()}: ${h.content}`)
-      .join("\n");
-
-    return `CONVERSACIÓN (reciente):\n${recent}\n\nMENSAJE DEL USUARIO:\n${userText}\n\nInstrucciones: Responde como asistente de gestoría. ${toneText}`;
+    return {
+      message: mergedMessage,
+      history: history.slice(-10).map((h) => ({ role: h.role, content: h.content })),
+      collection: selectedCollection || null,
+      tone,
+      top_k: 6,
+      internet,
+    };
   }
 
   async function send() {
@@ -53,26 +108,27 @@
     els.msg.value = "";
     render();
 
-    // “typing”
     history.push({ role: "assistant", content: "Pensando…" });
     render();
 
-    const question = buildPrompt(text);
-    const collection = selectedCollection ? selectedCollection : null;
-    const top_k = 6;
+    const payload = buildPayload(text);
 
     try {
-      const res = await fetch(`${API}/ask`, {
+      const res = await fetch(`${API}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, collection, top_k }),
+        body: JSON.stringify(payload),
       });
 
       const raw = await res.text();
       let data;
-      try { data = JSON.parse(raw); } catch { data = { raw }; }
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = { raw };
+      }
 
-      history.pop(); // quita “Pensando…”
+      history.pop();
 
       if (!res.ok) {
         history.push({ role: "assistant", content: `Error API: ${res.status}\n${JSON.stringify(data, null, 2)}` });
@@ -80,9 +136,16 @@
         return;
       }
 
-      history.push({ role: "assistant", content: (data.answer || "Sin respuesta").trim() });
+      const meta = [
+        `rag_sufficient=${data.rag_sufficient}`,
+        `internet_used=${data.internet_used}`,
+        `internet_reason=${data.internet_reason}`,
+      ].join(" | ");
+
+      history.push({ role: "assistant", content: (data.answer || "Sin respuesta").trim(), meta });
       render();
 
+      lastChatPayload = data;
     } catch (e) {
       history.pop();
       history.push({ role: "assistant", content: `Error de red / CORS: ${String(e)}` });
@@ -90,15 +153,70 @@
     }
   }
 
-  els.btnSend?.addEventListener("click", send);
+  async function generate() {
+    if (!lastChatPayload) {
+      els.genResult.textContent = "Primero haz una consulta en el chat.";
+      return;
+    }
 
+    const kind = els.templateKind?.value || "none";
+    const templateId = els.templateSelect?.value || "";
+
+    if (kind === "none" || !templateId) {
+      els.genResult.textContent = "Selecciona tipo y plantilla.";
+      return;
+    }
+
+    const data = { ...(lastChatPayload.extracted_fields || {}) };
+    delete data._template_id;
+
+    try {
+      let endpoint;
+      let body;
+      if (kind === "docx") {
+        endpoint = `${API}/documents/generate`;
+        body = { template_id: templateId, data, draft_text: lastChatPayload.draft_text || null };
+      } else {
+        endpoint = `${API}/spreadsheets/generate`;
+        body = { template_id: templateId, data, draft_text: lastChatPayload.draft_text || null };
+      }
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const txt = await res.text();
+      const out = JSON.parse(txt);
+
+      if (!res.ok) {
+        els.genResult.textContent = `Error: ${res.status} ${txt}`;
+        return;
+      }
+
+      const url = `${API}${out.download_url}`;
+      els.genResult.innerHTML = `<a href="${url}" target="_blank" rel="noopener">Descargar archivo generado</a>`;
+    } catch (e) {
+      els.genResult.textContent = `Error generando: ${String(e)}`;
+    }
+  }
+
+  els.btnSend?.addEventListener("click", send);
   els.msg?.addEventListener("keydown", (ev) => {
     if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") send();
   });
 
   els.btnNewChat?.addEventListener("click", () => {
     history.length = 0;
+    lastChatPayload = null;
     els.chatLog.textContent = "";
     els.msg.value = "";
+    els.genResult.textContent = "";
   });
+
+  els.templateKind?.addEventListener("change", fillTemplateSelect);
+  els.btnGenerate?.addEventListener("click", generate);
+
+  loadTemplates();
 })();
