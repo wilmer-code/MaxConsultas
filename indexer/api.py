@@ -2,7 +2,7 @@ import os
 import re
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -415,6 +415,36 @@ def _internet_fetch(url: str, question: str) -> tuple[str, list[dict]]:
     return answer, [{"title": title, "url": url, "snippet": snippet}]
 
 
+def _normalize_url_for_dedup(url: str) -> str:
+    try:
+        u = urlparse(url)
+        query = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if not k.lower().startswith("utm_")]
+        clean = u._replace(query=urlencode(query), fragment="")
+        return urlunparse(clean)
+    except Exception:
+        return url
+
+
+def _score_official_url(url: str) -> int:
+    u = (url or "").lower()
+    score = 0
+    # SEPE ranking deterministic
+    if "sepe.es" in u or "sede.sepe.gob.es" in u:
+        if "/homesepe/personas/" in u:
+            score += 6
+        if "prestaciones" in u or "prestaciones-por-desempleo" in u:
+            score += 4
+        if "subsidios" in u:
+            score += 4
+        if "requisitos" in u:
+            score += 3
+        if "/preguntas-frecuentes/" in u or "/faqs/" in u or "detalle-pregunta" in u or "?detail=" in u:
+            score -= 8
+        if "cookies" in u or "privacidad" in u:
+            score -= 5
+    return score
+
+
 def _search_official_sources(query: str, area: str | None = None) -> tuple[str, list[dict], str, list[str], list[dict]]:
     api_key = os.getenv("SERPAPI_API_KEY", "").strip()
     if not api_key:
@@ -428,38 +458,52 @@ def _search_official_sources(query: str, area: str | None = None) -> tuple[str, 
 
     merged_query = query if not area else f"{query} {area}"
     official_scope = (
-        "(site:boe.es OR site:www.boe.es OR site:sepe.es OR site:www.sepe.es OR "
+        "(site:boe.es OR site:www.boe.es OR site:sepe.es OR site:www.sepe.es OR site:sede.sepe.gob.es OR "
         "site:seg-social.es OR site:www.seg-social.es OR site:borm.es OR site:www.borm.es OR "
         "site:bocm.es OR site:www.bocm.es OR site:comunidad.madrid OR site:www.comunidad.madrid)"
     )
-    q = f"{official_scope} {merged_query}"
 
+    sepe_queries = [
+        "site:sepe.es subsidio por desempleo requisitos",
+        "site:sepe.es HomeSepe Personas prestaciones subsidios requisitos",
+        'site:sepe.es "subsidios" "requisitos"',
+    ]
+    queries = [f"{official_scope} {merged_query}"] + sepe_queries
+
+    raw_urls: list[str] = []
     try:
-        resp = requests.get(
-            "https://serpapi.com/search.json",
-            params={"engine": "google", "q": q, "api_key": api_key, "num": 5},
-            timeout=12,
-            headers={"User-Agent": "MaxConsultaBot/1.0"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        for q in queries:
+            resp = requests.get(
+                "https://serpapi.com/search.json",
+                params={"engine": "google", "q": q, "api_key": api_key, "num": 5},
+                timeout=12,
+                headers={"User-Agent": "MaxConsultaBot/1.0"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            for item in data.get("organic_results", [])[:5]:
+                link = (item.get("link") or "").strip()
+                if link and _is_allowed_url(link):
+                    raw_urls.append(link)
     except Exception:
         return ("Error al consultar proveedor de búsqueda oficial.", [], "search_provider_error", [], [])
 
-    candidate_urls: list[str] = []
-    for item in data.get("organic_results", [])[:5]:
-        link = (item.get("link") or "").strip()
-        if link and _is_allowed_url(link):
-            candidate_urls.append(link)
+    # dedup normalized preserving first seen original
+    normalized_seen = set()
+    dedup_urls = []
+    for u in raw_urls:
+        nu = _normalize_url_for_dedup(u)
+        if nu not in normalized_seen:
+            normalized_seen.add(nu)
+            dedup_urls.append(nu)
 
-    seen = set()
-    urls = []
-    for u in candidate_urls:
-        if u not in seen:
-            seen.add(u)
-            urls.append(u)
+    scored_urls = sorted(dedup_urls, key=lambda x: _score_official_url(x), reverse=True)
+    urls = scored_urls[:3]
 
-    urls = urls[:3]
+    # fallback to original dedup top3 if scoring wiped list (defensive)
+    if not urls:
+        urls = dedup_urls[:3]
+
     if not urls:
         return (
             "No encontré resultados oficiales relevantes. Prueba afinando la consulta.",
