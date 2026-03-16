@@ -613,6 +613,7 @@ def chat(inp: ChatIn):
             "doc_type": None,
             "extracted_fields": {},
             "draft_text": None,
+            "download_url": None,
             "url_used": None,
             "citations": [],
             "internet_effective": False,
@@ -763,6 +764,15 @@ def chat(inp: ChatIn):
     if template_id:
         extracted_fields["_template_id"] = template_id
 
+    qdoc = question.lower()
+    wants_docx = any(k in qdoc for k in [
+        "docx", "word", "archivo", "descargar", "descargable",
+        "dámelo en word", "damelo en word", "en word", "en docx", "para descargar", "descarga"
+    ])
+    wants_blank = any(k in qdoc for k in [
+        "en blanco", "plantilla en blanco", "modelo en blanco", "con huecos", "____"
+    ])
+
     required = []
     if template_id in DOCX_TEMPLATES:
         required = DOCX_TEMPLATES[template_id]["required_fields"]
@@ -772,8 +782,30 @@ def chat(inp: ChatIn):
     missing = [f for f in required if not str(extracted_fields.get(f, "")).strip()]
     needs_data = bool(template_id and missing)
     can_generate_doc = bool(template_id and not missing)
+    download_url = None
 
-    if needs_data:
+    if template_id == "carta_despido_objetivo" and wants_docx and wants_blank:
+        generated = _generate_docx_file(template_id, {}, None, allow_blank=True)
+        download_url = generated["download_url"]
+        needs_data = False
+        missing = []
+        can_generate_doc = True
+        doc_type = "docx"
+        extracted_fields = {}
+        answer = (answer + "\n\nHe generado la plantilla en blanco en Word para descarga.").strip()
+    elif template_id == "carta_despido_objetivo" and wants_docx and not wants_blank:
+        missing = [
+            "empresa_nombre", "empresa_cif", "empresa_domicilio", "trabajador_nombre",
+            "trabajador_dni", "fecha_efectos", "causa", "localidad_fecha_firma"
+        ]
+        needs_data = True
+        can_generate_doc = False
+        answer = (
+            "Resumen de lo entendido:\n"
+            "Quieres generar una carta de despido en Word.\n\n"
+            "Faltan datos:\n- " + "\n- ".join(missing)
+        )
+    elif needs_data:
         answer = (
             "Resumen de lo entendido:\n"
             f"Quieres generar una plantilla ({template_id}).\n\n"
@@ -805,8 +837,26 @@ def chat(inp: ChatIn):
         "doc_type": doc_type,
         "extracted_fields": extracted_fields,
         "draft_text": answer if can_generate_doc else None,
+        "download_url": download_url,
         "url_used": url_used,
     }
+
+
+def _generate_docx_file(template_id: str, data: dict, draft_text: str | None = None, allow_blank: bool = False) -> dict:
+    tpl = DOCX_TEMPLATES.get(template_id)
+    if not tpl:
+        raise HTTPException(status_code=400, detail="template_id de DOCX no soportado")
+
+    missing = [f for f in tpl["required_fields"] if not str((data or {}).get(f, "")).strip()]
+    if missing and not allow_blank:
+        raise HTTPException(status_code=400, detail={"needs_data": True, "fields_required": missing})
+
+    safe_data = {} if allow_blank else (data or {})
+    doc = tpl["render"](safe_data, draft_text)
+    doc_id = str(uuid.uuid4())
+    path = DOCS_DIR / f"{doc_id}.docx"
+    doc.save(str(path))
+    return {"doc_id": doc_id, "download_url": f"/documents/{doc_id}", "missing": missing}
 
 
 @app.get("/documents/templates")
@@ -825,20 +875,8 @@ def list_document_templates():
 
 @app.post("/documents/generate")
 def generate_document(inp: DocumentGenerateIn):
-    tpl = DOCX_TEMPLATES.get(inp.template_id)
-    if not tpl:
-        raise HTTPException(status_code=400, detail="template_id de DOCX no soportado")
-
-    missing = [f for f in tpl["required_fields"] if not str((inp.data or {}).get(f, "")).strip()]
-    if missing:
-        raise HTTPException(status_code=400, detail={"needs_data": True, "fields_required": missing})
-
-    doc = tpl["render"](inp.data or {}, inp.draft_text)
-    doc_id = str(uuid.uuid4())
-    path = DOCS_DIR / f"{doc_id}.docx"
-    doc.save(str(path))
-
-    return {"doc_id": doc_id, "download_url": f"/documents/{doc_id}"}
+    generated = _generate_docx_file(inp.template_id, inp.data or {}, inp.draft_text, allow_blank=False)
+    return {"doc_id": generated["doc_id"], "download_url": generated["download_url"]}
 
 
 @app.get("/documents/{doc_id}")

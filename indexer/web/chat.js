@@ -165,6 +165,16 @@
         sourcesHtml = `<div style="margin-top:10px;"><strong>Fuentes oficiales consultadas</strong><ol style="margin:6px 0 0 18px;">${items}</ol></div>`;
       }
 
+      if (data.needs_data && Array.isArray(data.fields_required) && data.fields_required.length) {
+        const miss = data.fields_required.map((f) => `<li>${esc(f)}</li>`).join("");
+        sourcesHtml += `<div style="margin-top:10px;"><strong>Faltan datos:</strong><ul style="margin:6px 0 0 18px;">${miss}</ul></div>`;
+      }
+
+      if (data.download_url) {
+        const dl = /^https?:\/\//.test(data.download_url) ? data.download_url : `${API}${data.download_url}`;
+        sourcesHtml += `<div style="margin-top:10px;"><a class="primary" href="${esc(dl)}" target="_blank" rel="noopener">Descargar Word (.docx)</a></div>`;
+      }
+
       history.push({ role: "assistant", content, meta, sourcesHtml });
       render();
 
