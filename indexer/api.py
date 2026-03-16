@@ -339,10 +339,12 @@ def ask(inp: AskIn):
 
 def _best_similarity(sources: list[dict]) -> float:
     vals = []
-    for s in sources:
+    for s in sources or []:
         sim = s.get("similarity")
-        if isinstance(sim, (float, int)):
+        try:
             vals.append(float(sim))
+        except (TypeError, ValueError):
+            continue
     return max(vals) if vals else 0.0
 
 
@@ -531,8 +533,10 @@ def chat(inp: ChatIn):
     sources = rag.get("sources") or []
 
     best_similarity = _best_similarity(sources)
-    rag_sufficient = (len(sources) >= 2 and best_similarity >= RAG_SIM_THRESHOLD) or (
-        len(rag_answer) >= 400 and len(sources) >= 1
+    sources_count = len(sources)
+    answer_len = len(rag_answer or "")
+    rag_sufficient = (sources_count >= 2 and best_similarity >= 0.72) or (
+        answer_len >= 400 and sources_count >= 1
     )
 
     internet_used = False
@@ -543,11 +547,11 @@ def chat(inp: ChatIn):
 
     if inp.internet:
         provided_url = (inp.url or _extract_url(question) or "").strip() or None
-        if provided_url and not _is_allowed_url(provided_url):
+        if rag_sufficient:
+            internet_reason = "rag_sufficient"
+        elif provided_url and not _is_allowed_url(provided_url):
             internet_reason = "blocked_domain"
             answer = (answer + "\n\nBloqueado: solo fuentes oficiales permitidas.").strip()
-        elif rag_sufficient:
-            internet_reason = "rag_sufficient"
         else:
             if provided_url:
                 try:
