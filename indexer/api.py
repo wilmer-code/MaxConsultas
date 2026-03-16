@@ -571,6 +571,8 @@ def chat(inp: ChatIn):
             "draft_text": None,
             "url_used": None,
             "citations": [],
+            "internet_effective": False,
+            "auto_official_triggered": False,
             "rag_override_reason": None,
         }
 
@@ -615,6 +617,27 @@ def chat(inp: ChatIn):
         "vigente",
         "vigente hoy",
         "normativa vigente",
+        "requisitos",
+        "solicitar",
+        "trámite",
+        "tramite",
+        "prestación",
+        "prestacion",
+        "subsidio",
+        "cuantía",
+        "cuantia",
+        "plazo",
+        "documentación",
+        "documentacion",
+        "donde",
+        "enlace",
+        "url",
+        "sede",
+        "boe",
+        "sepe",
+        "seguridad social",
+        "bocm",
+        "borm",
     ])
 
     provided_url_pre = (inp.url or _extract_url(question) or "").strip() or None
@@ -629,7 +652,10 @@ def chat(inp: ChatIn):
             borme_url, _ = _search_borme_id(official_id_value)
             official_id_url = borme_url
 
-    if inp.internet and not provided_url_pre and needs_official_lookup and best_similarity < 0.72:
+    auto_official_triggered = bool(needs_official_lookup and not provided_url_pre)
+    internet_effective = bool(inp.internet or auto_official_triggered)
+
+    if internet_effective and auto_official_triggered:
         rag_sufficient = False
         rag_override_reason = "needs_official_lookup_low_similarity"
     else:
@@ -643,7 +669,7 @@ def chat(inp: ChatIn):
     url_used: list[str] | None = None
     answer = rag_answer
 
-    if inp.internet:
+    if internet_effective:
         provided_url = provided_url_pre
         if provided_url and not _is_allowed_url(provided_url):
             internet_reason = "blocked_domain"
@@ -711,6 +737,13 @@ def chat(inp: ChatIn):
             "\n\nNo voy a inventar datos. Si lo prefieres, te preparo una plantilla en blanco con ____."
         )
 
+    if internet_used and url_used:
+        refs = "\n".join([f"[{i}] {u}" for i, u in enumerate(url_used, start=1)])
+        if "Fuentes oficiales consultadas:" not in answer:
+            answer = (answer + "\n\nFuentes oficiales consultadas:\n" + refs).strip()
+    elif not internet_used:
+        answer = re.sub(r"https?://\S+", "[enlace no verificado]", answer)
+
     return {
         "answer": answer,
         "sources": sources,
@@ -719,6 +752,8 @@ def chat(inp: ChatIn):
         "internet_reason": internet_reason,
         "internet_sources": internet_sources,
         "citations": citations,
+        "internet_effective": internet_effective,
+        "auto_official_triggered": auto_official_triggered,
         "rag_override_reason": rag_override_reason,
         "needs_data": needs_data,
         "fields_required": missing,
