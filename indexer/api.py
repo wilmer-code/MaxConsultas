@@ -161,6 +161,29 @@ def _render_docx_solicitud_generica(data: dict, draft_text: str | None) -> Docum
     return doc
 
 
+def _render_docx_generico(data: dict, draft_text: str | None) -> Document:
+    doc = Document()
+    title = (data.get("title") or "").strip()
+    body = (data.get("body") or "").strip()
+    footer = (data.get("footer") or "").strip()
+
+    if title:
+        doc.add_heading(title, level=1)
+
+    chunks = [p.strip() for p in body.split("\n\n") if p.strip()]
+    if not chunks and draft_text:
+        chunks = [p.strip() for p in (draft_text or "").split("\n\n") if p.strip()]
+
+    for c in chunks:
+        doc.add_paragraph(c)
+
+    if footer:
+        doc.add_paragraph("")
+        doc.add_paragraph(footer)
+
+    return doc
+
+
 def _render_xlsx_gastos_autonomo(data: dict, rows: list[dict] | None) -> Workbook:
     wb = Workbook()
     ws = wb.active
@@ -216,6 +239,14 @@ DOCX_TEMPLATES = {
         "required_fields": ["organismo", "solicitante_nombre", "solicitante_dni", "peticion"],
         "optional_fields": ["asunto", "exposicion"],
         "render": _render_docx_solicitud_generica,
+    },
+    "doc_generico": {
+        "id": "doc_generico",
+        "title": "Documento Word (genérico)",
+        "description": "Exporta cualquier respuesta textual a DOCX.",
+        "required_fields": ["body"],
+        "optional_fields": ["title", "footer"],
+        "render": _render_docx_generico,
     },
 }
 
@@ -820,6 +851,10 @@ def chat(inp: ChatIn):
     elif not internet_used:
         answer = re.sub(r"https?://\S+", "[enlace no verificado]", answer)
 
+    draft_text = (answer or "").strip() or None
+    can_generate_doc_out = bool(draft_text)
+    doc_type_out = doc_type if doc_type else ("docx" if can_generate_doc_out else None)
+
     return {
         "answer": answer,
         "sources": sources,
@@ -833,10 +868,10 @@ def chat(inp: ChatIn):
         "rag_override_reason": rag_override_reason,
         "needs_data": needs_data,
         "fields_required": missing,
-        "can_generate_doc": can_generate_doc,
-        "doc_type": doc_type,
+        "can_generate_doc": can_generate_doc_out,
+        "doc_type": doc_type_out,
         "extracted_fields": extracted_fields,
-        "draft_text": answer if can_generate_doc else None,
+        "draft_text": draft_text,
         "download_url": download_url,
         "url_used": url_used,
     }
@@ -866,11 +901,18 @@ def _generate_docx_file(template_id: str, data: dict, draft_text: str | None = N
     if not tpl:
         raise HTTPException(status_code=400, detail="template_id de DOCX no soportado")
 
-    missing = [f for f in tpl["required_fields"] if not str((data or {}).get(f, "")).strip()]
-    if missing and not allow_blank:
-        raise HTTPException(status_code=400, detail={"needs_data": True, "fields_required": missing})
+    if template_id == "doc_generico":
+        body = str((data or {}).get("body", "")).strip()
+        if not body:
+            raise HTTPException(status_code=422, detail={"needs_data": True, "fields_required": ["body"]})
+        safe_data = data or {}
+        missing = []
+    else:
+        missing = [f for f in tpl["required_fields"] if not str((data or {}).get(f, "")).strip()]
+        if missing and not allow_blank:
+            raise HTTPException(status_code=400, detail={"needs_data": True, "fields_required": missing})
+        safe_data = _blank_docx_data(template_id) if allow_blank else (data or {})
 
-    safe_data = _blank_docx_data(template_id) if allow_blank else (data or {})
     doc = tpl["render"](safe_data, draft_text)
     doc_id = str(uuid.uuid4())
     path = DOCS_DIR / f"{doc_id}.docx"

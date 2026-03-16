@@ -31,6 +31,7 @@
   const history = [];
   const templates = { docx: [], xlsx: [] };
   let lastChatPayload = null;
+  let lastDraftText = "";
 
   document.querySelectorAll(".seg-btn[data-collection]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -113,6 +114,44 @@
     const text = (els.msg?.value || "").trim();
     if (!text) return;
 
+    const wordIntent = /(pas(a|ame)lo.*(word|docx)|dame(lo)?\s+en\s+(word|docx)|en\s+word\s+para\s+descargar)/i.test(text);
+    if (wordIntent) {
+      history.push({ role: "user", content: text });
+      els.msg.value = "";
+      render();
+
+      if (!lastDraftText) {
+        history.push({ role: "assistant", content: "No tengo un borrador previo. Primero pide una respuesta y luego dime 'pásamelo a Word'." });
+        render();
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API}/documents/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            template_id: "doc_generico",
+            data: { title: "MaxConsulta - Respuesta", body: lastDraftText },
+          }),
+        });
+        const out = await res.json();
+        if (!res.ok) {
+          history.push({ role: "assistant", content: `No pude generar Word: ${res.status}` });
+          render();
+          return;
+        }
+        const dl = /^https?:\/\//.test(out.download_url) ? out.download_url : `${API}${out.download_url}`;
+        history.push({ role: "assistant", content: `Documento Word generado. Enlace: ${dl}` });
+        render();
+        return;
+      } catch (e) {
+        history.push({ role: "assistant", content: `No pude generar Word: ${String(e)}` });
+        render();
+        return;
+      }
+    }
+
     history.push({ role: "user", content: text });
     els.msg.value = "";
     render();
@@ -179,6 +218,7 @@
       render();
 
       lastChatPayload = data;
+      lastDraftText = (data.draft_text || data.answer || "").trim();
     } catch (e) {
       history.pop();
       history.push({ role: "assistant", content: `Error de red / CORS: ${String(e)}` });
