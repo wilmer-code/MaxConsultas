@@ -140,6 +140,7 @@
         `rag_sufficient=${data.rag_sufficient}`,
         `internet_used=${data.internet_used}`,
         `internet_reason=${data.internet_reason}`,
+        `url_used=${Array.isArray(data.url_used) ? data.url_used.join(',') : (data.url_used || '-')}`,
       ].join(" | ");
 
       history.push({ role: "assistant", content: (data.answer || "Sin respuesta").trim(), meta });

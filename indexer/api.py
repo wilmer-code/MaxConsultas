@@ -74,12 +74,15 @@ class ChatMessage(BaseModel):
 
 
 class ChatIn(BaseModel):
-    message: str
+    message: str | None = None
+    question: str | None = None
     history: list[ChatMessage] = []
     collection: str | None = None
+    area: str | None = None
     tone: str | None = "neutro"
     top_k: int | None = 6
     internet: bool = False
+    url: str | None = None
 
 
 class DocumentGenerateIn(BaseModel):
@@ -353,19 +356,102 @@ def _is_allowed_url(url: str) -> bool:
     return host in ALLOWLIST
 
 
+def _clean_text_from_html(html: str) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
+        tag.decompose()
+    return " ".join(soup.stripped_strings)
+
+
 def _internet_fetch(url: str, question: str) -> tuple[str, list[dict]]:
     headers = {"User-Agent": "MaxConsultasBot/1.0 (+https://app.maxconsulta.com)"}
-    r = requests.get(url, timeout=12, headers=headers)
+    r = requests.get(url, timeout=10, headers=headers)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     title = (soup.title.string.strip() if soup.title and soup.title.string else url)
-    text = " ".join(soup.stripped_strings)
+    text = _clean_text_from_html(r.text)
     snippet = text[:700] + ("..." if len(text) > 700 else "")
     answer = (
         f"He consultado la fuente oficial permitida: {title}. "
         f"Resumen rápido relacionado con tu consulta '{question}':\n\n{snippet}"
     )
     return answer, [{"title": title, "url": url, "snippet": snippet}]
+
+
+def _search_official_sources(query: str, area: str | None = None) -> tuple[str, list[dict], str, list[str]]:
+    api_key = os.getenv("SERPAPI_API_KEY", "").strip()
+    if not api_key:
+        return (
+            "Activa SERPAPI_API_KEY en el servidor para buscar en fuentes oficiales.",
+            [],
+            "search_provider_missing",
+            [],
+        )
+
+    domains = ["boe.es", "sepe.es", "seg-social.es", "borm.es", "comunidad.madrid"]
+    merged_query = query if not area else f"{query} {area}"
+
+    candidate_urls: list[str] = []
+    for d in domains:
+        q = f"site:{d} {merged_query}"
+        try:
+            resp = requests.get(
+                "https://serpapi.com/search.json",
+                params={"engine": "google", "q": q, "api_key": api_key, "num": 3},
+                timeout=12,
+                headers={"User-Agent": "MaxConsultasBot/1.0 (+https://app.maxconsulta.com)"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            for item in data.get("organic_results", [])[:3]:
+                link = (item.get("link") or "").strip()
+                if link and _is_allowed_url(link):
+                    candidate_urls.append(link)
+        except Exception:
+            return ("Error al consultar proveedor de búsqueda oficial.", [], "search_provider_error", [])
+
+    seen = set()
+    urls = []
+    for u in candidate_urls:
+        if u not in seen:
+            seen.add(u)
+            urls.append(u)
+
+    urls = urls[:3]
+    if not urls:
+        return (
+            "No encontré resultados oficiales relevantes. Prueba afinando la consulta.",
+            [],
+            "no_official_results",
+            [],
+        )
+
+    sources: list[dict] = []
+    snippets: list[str] = []
+    for u in urls:
+        try:
+            headers = {"User-Agent": "MaxConsultasBot/1.0 (+https://app.maxconsulta.com)"}
+            r = requests.get(u, timeout=10, headers=headers)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "html.parser")
+            title = (soup.title.string.strip() if soup.title and soup.title.string else u)
+            text = _clean_text_from_html(r.text)
+            snippet = text[:500] + ("..." if len(text) > 500 else "")
+            sources.append({"title": title, "url": u, "snippet": snippet})
+            snippets.append(f"- {title}: {snippet}")
+        except Exception:
+            continue
+
+    if not sources:
+        return (
+            "No pude recuperar contenido útil de los resultados oficiales.",
+            [],
+            "no_official_results",
+            urls,
+        )
+
+    answer = "He consultado fuentes oficiales permitidas y esto es lo relevante:\n\n" + "\n\n".join(snippets)
+    return (answer, sources, "searched_official_sources", [s["url"] for s in sources])
 
 
 def _detect_template(message: str) -> tuple[str | None, str | None]:
@@ -407,7 +493,7 @@ def _extract_fields(history: list[ChatMessage], message: str) -> dict:
 
 @app.post("/chat")
 def chat(inp: ChatIn):
-    question = (inp.message or "").strip()
+    question = (inp.message or inp.question or "").strip()
     if not question:
         return {
             "answer": "Escribe una pregunta.",
@@ -434,9 +520,9 @@ def chat(inp: ChatIn):
     tone_instruction = "Tono formal y profesional." if tone == "formal" else "Tono neutro y profesional."
 
     composed = (
-        f"{tone_instruction}\\n"
-        "No inventes datos de personas, empresa, fechas o causas.\\n"
-        f"HISTORIAL:\n{chr(10).join(history_lines) if history_lines else '(sin historial)'}\\n\\n"
+        f"{tone_instruction}\n"
+        "No inventes datos de personas, empresa, fechas o causas.\n"
+        f"HISTORIAL:\n{chr(10).join(history_lines) if history_lines else '(sin historial)'}\n\n"
         f"CONSULTA ACTUAL:\n{question}"
     )
 
@@ -452,31 +538,40 @@ def chat(inp: ChatIn):
     internet_used = False
     internet_reason = "internet_disabled"
     internet_sources: list[dict] = []
-    url_used = None
+    url_used: list[str] | None = None
     answer = rag_answer
 
     if inp.internet:
-        url = _extract_url(question)
-        if url and not _is_allowed_url(url):
+        provided_url = (inp.url or _extract_url(question) or "").strip() or None
+        if provided_url and not _is_allowed_url(provided_url):
             internet_reason = "blocked_domain"
             answer = (answer + "\n\nBloqueado: solo fuentes oficiales permitidas.").strip()
         elif rag_sufficient:
             internet_reason = "rag_sufficient"
         else:
-            if not url:
-                internet_reason = "no_results"
-                answer = (answer + "\n\nPara usar Internet fallback, pega una URL oficial permitida (boe.es, sepe.es, seg-social.es, borm.es o comunidad.madrid).").strip()
-            else:
+            if provided_url:
                 try:
-                    web_answer, web_sources = _internet_fetch(url, question)
+                    web_answer, web_sources = _internet_fetch(provided_url, question)
                     internet_used = True
                     internet_reason = "rag_insufficient"
                     internet_sources = web_sources
-                    url_used = url
+                    url_used = [provided_url]
                     answer = (answer + "\n\n" + web_answer).strip()
                 except Exception:
-                    internet_reason = "no_results"
+                    internet_reason = "no_official_results"
                     answer = (answer + "\n\nNo pude recuperar contenido de la URL oficial indicada.").strip()
+            else:
+                area = inp.area or inp.collection
+                auto_answer, auto_sources, auto_reason, auto_urls = _search_official_sources(question, area)
+                internet_reason = auto_reason
+                if auto_sources:
+                    internet_used = True
+                    internet_sources = auto_sources
+                    url_used = auto_urls
+                    answer = (answer + "\n\n" + auto_answer).strip()
+                else:
+                    internet_used = False
+                    answer = (answer + "\n\n" + auto_answer).strip()
 
     doc_type, template_id = _detect_template(question)
     extracted_fields = _extract_fields(inp.history or [], question)
