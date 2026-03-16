@@ -842,6 +842,25 @@ def chat(inp: ChatIn):
     }
 
 
+
+
+def _blank_docx_data(template_id: str) -> dict:
+    if template_id == "carta_despido_objetivo":
+        return {
+            "empresa_nombre": "________",
+            "empresa_cif": "________",
+            "empresa_domicilio": "________",
+            "trabajador_nombre": "________",
+            "trabajador_dni": "________",
+            "fecha_efectos": "____/____/______",
+            "causa": "________________________",
+            "localidad_fecha_firma": "____________________, a ____/____/______",
+        }
+    # fallback genérico
+    tpl = DOCX_TEMPLATES.get(template_id) or {}
+    req = tpl.get("required_fields", [])
+    return {k: "________" for k in req}
+
 def _generate_docx_file(template_id: str, data: dict, draft_text: str | None = None, allow_blank: bool = False) -> dict:
     tpl = DOCX_TEMPLATES.get(template_id)
     if not tpl:
@@ -851,7 +870,7 @@ def _generate_docx_file(template_id: str, data: dict, draft_text: str | None = N
     if missing and not allow_blank:
         raise HTTPException(status_code=400, detail={"needs_data": True, "fields_required": missing})
 
-    safe_data = {} if allow_blank else (data or {})
+    safe_data = _blank_docx_data(template_id) if allow_blank else (data or {})
     doc = tpl["render"](safe_data, draft_text)
     doc_id = str(uuid.uuid4())
     path = DOCS_DIR / f"{doc_id}.docx"
@@ -875,7 +894,9 @@ def list_document_templates():
 
 @app.post("/documents/generate")
 def generate_document(inp: DocumentGenerateIn):
-    generated = _generate_docx_file(inp.template_id, inp.data or {}, inp.draft_text, allow_blank=False)
+    data = inp.data or {}
+    blank_mode = (not data) or bool(data.get("blank"))
+    generated = _generate_docx_file(inp.template_id, data, inp.draft_text, allow_blank=blank_mode)
     return {"doc_id": generated["doc_id"], "download_url": generated["download_url"]}
 
 
