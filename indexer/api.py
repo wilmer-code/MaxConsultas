@@ -354,6 +354,40 @@ def _extract_url(text: str) -> str | None:
     return m.group(0) if m else None
 
 
+def _detect_official_id(text: str) -> tuple[str, str] | None:
+    t = text or ""
+    m_boe = re.search(r"\b(BOE-[A-Z]-\d{4}-\d{3,6})\b", t, flags=re.IGNORECASE)
+    if m_boe:
+        return ("boe", m_boe.group(1).upper())
+    m_borme = re.search(r"\b(BORME-[A-Z]-\d{4}-\d{3,6})\b", t, flags=re.IGNORECASE)
+    if m_borme:
+        return ("borme", m_borme.group(1).upper())
+    return None
+
+
+def _search_borme_id(id_value: str) -> tuple[str | None, str]:
+    api_key = os.getenv("SERPAPI_API_KEY", "").strip()
+    if not api_key:
+        return (None, "search_provider_missing")
+    q = f"site:boe.es/borme {id_value}"
+    try:
+        resp = requests.get(
+            "https://serpapi.com/search.json",
+            params={"engine": "google", "q": q, "api_key": api_key, "num": 3},
+            timeout=12,
+            headers={"User-Agent": "MaxConsultaBot/1.0"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        for item in data.get("organic_results", [])[:3]:
+            link = (item.get("link") or "").strip()
+            if link and _is_allowed_url(link) and "/borme" in link:
+                return (link, "direct_official_id")
+        return (None, "no_official_results")
+    except Exception:
+        return (None, "search_provider_error")
+
+
 def _is_allowed_url(url: str) -> bool:
     host = (urlparse(url).netloc or "").lower()
     return host in ALLOWLIST
@@ -573,6 +607,7 @@ def chat(inp: ChatIn):
         "hoy en el boe",
         "boe de hoy",
         "enlace oficial",
+        "enlaces oficiales",
         "dame enlace",
         "dame el enlace",
         "última publicación",
@@ -583,6 +618,17 @@ def chat(inp: ChatIn):
     ])
 
     provided_url_pre = (inp.url or _extract_url(question) or "").strip() or None
+    official_id = _detect_official_id(question)
+    official_id_url = None
+    official_id_kind = None
+    if official_id:
+        official_id_kind, official_id_value = official_id
+        if official_id_kind == "boe":
+            official_id_url = f"https://www.boe.es/buscar/doc.php?id={official_id_value}"
+        elif official_id_kind == "borme":
+            borme_url, _ = _search_borme_id(official_id_value)
+            official_id_url = borme_url
+
     if inp.internet and not provided_url_pre and needs_official_lookup and best_similarity < 0.72:
         rag_sufficient = False
         rag_override_reason = "needs_official_lookup_low_similarity"
@@ -602,6 +648,18 @@ def chat(inp: ChatIn):
         if provided_url and not _is_allowed_url(provided_url):
             internet_reason = "blocked_domain"
             answer = (answer + "\n\nBloqueado: solo fuentes oficiales permitidas.").strip()
+        elif official_id_url:
+            try:
+                web_answer, web_sources = _internet_fetch(official_id_url, question)
+                internet_used = True
+                internet_reason = "direct_official_id"
+                internet_sources = web_sources
+                citations = [{"n": 1, "url": official_id_url}]
+                url_used = [official_id_url]
+                answer = (answer + "\n\n" + web_answer + "\n\nFuentes oficiales consultadas:\n[1] " + official_id_url).strip()
+            except Exception:
+                internet_reason = "no_official_results"
+                answer = (answer + "\n\nNo pude recuperar contenido de la referencia oficial indicada.").strip()
         elif provided_url:
             try:
                 web_answer, web_sources = _internet_fetch(provided_url, question)
