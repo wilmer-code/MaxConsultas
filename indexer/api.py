@@ -81,7 +81,7 @@ class ChatIn(BaseModel):
     area: str | None = None
     tone: str | None = "neutro"
     top_k: int | None = 6
-    internet: bool = False
+    internet: bool = True
     url: str | None = None
 
 
@@ -366,13 +366,13 @@ def _clean_text_from_html(html: str) -> str:
 
 
 def _internet_fetch(url: str, question: str) -> tuple[str, list[dict]]:
-    headers = {"User-Agent": "MaxConsultasBot/1.0 (+https://app.maxconsulta.com)"}
+    headers = {"User-Agent": "MaxConsultaBot/1.0"}
     r = requests.get(url, timeout=10, headers=headers)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     title = (soup.title.string.strip() if soup.title and soup.title.string else url)
     text = _clean_text_from_html(r.text)
-    snippet = text[:700] + ("..." if len(text) > 700 else "")
+    snippet = text[:200] + ("..." if len(text) > 200 else "")
     answer = (
         f"He consultado la fuente oficial permitida: {title}. "
         f"Resumen rápido relacionado con tu consulta '{question}':\n\n{snippet}"
@@ -380,7 +380,7 @@ def _internet_fetch(url: str, question: str) -> tuple[str, list[dict]]:
     return answer, [{"title": title, "url": url, "snippet": snippet}]
 
 
-def _search_official_sources(query: str, area: str | None = None) -> tuple[str, list[dict], str, list[str]]:
+def _search_official_sources(query: str, area: str | None = None) -> tuple[str, list[dict], str, list[str], list[dict]]:
     api_key = os.getenv("SERPAPI_API_KEY", "").strip()
     if not api_key:
         return (
@@ -388,29 +388,34 @@ def _search_official_sources(query: str, area: str | None = None) -> tuple[str, 
             [],
             "search_provider_missing",
             [],
+            [],
         )
 
-    domains = ["boe.es", "sepe.es", "seg-social.es", "borm.es", "comunidad.madrid"]
     merged_query = query if not area else f"{query} {area}"
+    official_scope = (
+        "(site:boe.es OR site:www.boe.es OR site:sepe.es OR site:www.sepe.es OR "
+        "site:seg-social.es OR site:www.seg-social.es OR site:borm.es OR site:www.borm.es OR "
+        "site:comunidad.madrid OR site:www.comunidad.madrid)"
+    )
+    q = f"{official_scope} {merged_query}"
+
+    try:
+        resp = requests.get(
+            "https://serpapi.com/search.json",
+            params={"engine": "google", "q": q, "api_key": api_key, "num": 5},
+            timeout=12,
+            headers={"User-Agent": "MaxConsultaBot/1.0"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return ("Error al consultar proveedor de búsqueda oficial.", [], "search_provider_error", [], [])
 
     candidate_urls: list[str] = []
-    for d in domains:
-        q = f"site:{d} {merged_query}"
-        try:
-            resp = requests.get(
-                "https://serpapi.com/search.json",
-                params={"engine": "google", "q": q, "api_key": api_key, "num": 3},
-                timeout=12,
-                headers={"User-Agent": "MaxConsultasBot/1.0 (+https://app.maxconsulta.com)"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            for item in data.get("organic_results", [])[:3]:
-                link = (item.get("link") or "").strip()
-                if link and _is_allowed_url(link):
-                    candidate_urls.append(link)
-        except Exception:
-            return ("Error al consultar proveedor de búsqueda oficial.", [], "search_provider_error", [])
+    for item in data.get("organic_results", [])[:5]:
+        link = (item.get("link") or "").strip()
+        if link and _is_allowed_url(link):
+            candidate_urls.append(link)
 
     seen = set()
     urls = []
@@ -426,21 +431,33 @@ def _search_official_sources(query: str, area: str | None = None) -> tuple[str, 
             [],
             "no_official_results",
             [],
+            [],
         )
 
     sources: list[dict] = []
     snippets: list[str] = []
-    for u in urls:
+    citations: list[dict] = []
+
+    for i, u in enumerate(urls, start=1):
         try:
-            headers = {"User-Agent": "MaxConsultasBot/1.0 (+https://app.maxconsulta.com)"}
+            headers = {"User-Agent": "MaxConsultaBot/1.0"}
             r = requests.get(u, timeout=10, headers=headers)
             r.raise_for_status()
-            soup = BeautifulSoup(r.text, "html.parser")
-            title = (soup.title.string.strip() if soup.title and soup.title.string else u)
-            text = _clean_text_from_html(r.text)
-            snippet = text[:500] + ("..." if len(text) > 500 else "")
+            content_type = (r.headers.get("content-type") or "").lower()
+            title = u
+            snippet = "Fuente oficial consultada"
+
+            if "pdf" in content_type or u.lower().endswith(".pdf"):
+                snippet = "Documento PDF oficial (sin volcado de contenido)."
+            else:
+                soup = BeautifulSoup(r.text, "html.parser")
+                title = (soup.title.string.strip() if soup.title and soup.title.string else u)
+                text = _clean_text_from_html(r.text)[:12000]
+                snippet = text[:200] + ("..." if len(text) > 200 else "")
+
             sources.append({"title": title, "url": u, "snippet": snippet})
-            snippets.append(f"- {title}: {snippet}")
+            citations.append({"n": i, "url": u})
+            snippets.append(f"[{i}] {title}: {snippet}")
         except Exception:
             continue
 
@@ -450,10 +467,17 @@ def _search_official_sources(query: str, area: str | None = None) -> tuple[str, 
             [],
             "no_official_results",
             urls,
+            [],
         )
 
-    answer = "He consultado fuentes oficiales permitidas y esto es lo relevante:\n\n" + "\n\n".join(snippets)
-    return (answer, sources, "searched_official_sources", [s["url"] for s in sources])
+    urls_text = "\n".join([f"[{i}] {u}" for i, u in enumerate([s['url'] for s in sources], start=1)])
+    answer = (
+        "Resumen con fuentes oficiales consultadas:\n\n"
+        + "\n".join(snippets)
+        + "\n\nFuentes oficiales consultadas:\n"
+        + urls_text
+    )
+    return (answer, sources, "searched_official_sources", [s["url"] for s in sources], citations)
 
 
 def _detect_template(message: str) -> tuple[str | None, str | None]:
@@ -511,6 +535,8 @@ def chat(inp: ChatIn):
             "extracted_fields": {},
             "draft_text": None,
             "url_used": None,
+            "citations": [],
+            "rag_override_reason": None,
         }
 
     history_lines = []
@@ -550,7 +576,9 @@ def chat(inp: ChatIn):
         "dame el enlace",
         "última publicación",
         "ultima publicacion",
+        "vigente",
         "vigente hoy",
+        "normativa vigente",
     ])
 
     provided_url_pre = (inp.url or _extract_url(question) or "").strip() or None
@@ -564,16 +592,17 @@ def chat(inp: ChatIn):
     internet_used = False
     internet_reason = "internet_disabled"
     internet_sources: list[dict] = []
+    citations: list[dict] = []
     url_used: list[str] | None = None
     answer = rag_answer
 
     if inp.internet:
         provided_url = provided_url_pre
-        if rag_sufficient:
-            internet_reason = "rag_sufficient"
-        elif provided_url and not _is_allowed_url(provided_url):
+        if provided_url and not _is_allowed_url(provided_url):
             internet_reason = "blocked_domain"
             answer = (answer + "\n\nBloqueado: solo fuentes oficiales permitidas.").strip()
+        elif rag_sufficient:
+            internet_reason = "rag_sufficient"
         else:
             if provided_url:
                 try:
@@ -581,19 +610,21 @@ def chat(inp: ChatIn):
                     internet_used = True
                     internet_reason = "rag_insufficient"
                     internet_sources = web_sources
+                    citations = [{"n": 1, "url": provided_url}]
                     url_used = [provided_url]
-                    answer = (answer + "\n\n" + web_answer).strip()
+                    answer = (answer + "\n\n" + web_answer + "\n\nFuentes oficiales consultadas:\n[1] " + provided_url).strip()
                 except Exception:
                     internet_reason = "no_official_results"
                     answer = (answer + "\n\nNo pude recuperar contenido de la URL oficial indicada.").strip()
             else:
                 area = inp.area or inp.collection
-                auto_answer, auto_sources, auto_reason, auto_urls = _search_official_sources(question, area)
+                auto_answer, auto_sources, auto_reason, auto_urls, auto_citations = _search_official_sources(question, area)
                 internet_reason = auto_reason
                 if auto_sources:
                     internet_used = True
                     internet_sources = auto_sources
                     url_used = auto_urls
+                    citations = auto_citations
                     answer = (answer + "\n\n" + auto_answer).strip()
                 else:
                     internet_used = False
@@ -629,6 +660,7 @@ def chat(inp: ChatIn):
         "internet_used": internet_used,
         "internet_reason": internet_reason,
         "internet_sources": internet_sources,
+        "citations": citations,
         "rag_override_reason": rag_override_reason,
         "needs_data": needs_data,
         "fields_required": missing,

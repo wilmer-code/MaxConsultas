@@ -19,6 +19,15 @@
   if (els.apiLabel) els.apiLabel.textContent = API;
 
   let selectedCollection = "";
+
+  function esc(t) {
+    return String(t || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
   const history = [];
   const templates = { docx: [], xlsx: [] };
   let lastChatPayload = null;
@@ -86,17 +95,17 @@
 
   function buildPayload(userText) {
     const tone = els.tone?.value || "neutro";
-    const internet = !!els.internetFallback?.checked;
     const explicitUrl = (els.explicitUrl?.value || "").trim();
-    const mergedMessage = explicitUrl ? `${userText}\nURL: ${explicitUrl}` : userText;
 
     return {
-      message: mergedMessage,
+      message: userText,
+      question: userText,
+      url: explicitUrl || null,
       history: history.slice(-10).map((h) => ({ role: h.role, content: h.content })),
       collection: selectedCollection || null,
       tone,
       top_k: 6,
-      internet,
+      internet: true,
     };
   }
 
@@ -143,7 +152,20 @@
         `url_used=${Array.isArray(data.url_used) ? data.url_used.join(',') : (data.url_used || '-')}`,
       ].join(" | ");
 
-      history.push({ role: "assistant", content: (data.answer || "Sin respuesta").trim(), meta });
+      let content = (data.answer || "Sin respuesta").trim();
+      const webSources = data.internet_sources || [];
+      let sourcesHtml = "";
+      if (webSources.length) {
+        const items = webSources.slice(0, 3).map((s) => {
+          const t = esc(s.title || s.url);
+          const u = esc(s.url || "");
+          const sn = esc((s.snippet || "").slice(0, 200));
+          return `<li style="margin-bottom:8px;"><a href="${u}" target="_blank" rel="noopener">${t}</a><div class="muted">${sn}</div></li>`;
+        }).join("");
+        sourcesHtml = `<div style="margin-top:10px;"><strong>Fuentes oficiales consultadas</strong><ol style="margin:6px 0 0 18px;">${items}</ol></div>`;
+      }
+
+      history.push({ role: "assistant", content, meta, sourcesHtml });
       render();
 
       lastChatPayload = data;
