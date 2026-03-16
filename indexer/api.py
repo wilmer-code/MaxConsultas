@@ -56,6 +56,7 @@ ALLOWLIST = {
     "sepe.es", "www.sepe.es",
     "seg-social.es", "www.seg-social.es",
     "borm.es", "www.borm.es",
+    "bocm.es", "www.bocm.es",
     "comunidad.madrid", "www.comunidad.madrid",
 }
 
@@ -395,7 +396,7 @@ def _search_official_sources(query: str, area: str | None = None) -> tuple[str, 
     official_scope = (
         "(site:boe.es OR site:www.boe.es OR site:sepe.es OR site:www.sepe.es OR "
         "site:seg-social.es OR site:www.seg-social.es OR site:borm.es OR site:www.borm.es OR "
-        "site:comunidad.madrid OR site:www.comunidad.madrid)"
+        "site:bocm.es OR site:www.bocm.es OR site:comunidad.madrid OR site:www.comunidad.madrid)"
     )
     q = f"{official_scope} {merged_query}"
 
@@ -601,34 +602,33 @@ def chat(inp: ChatIn):
         if provided_url and not _is_allowed_url(provided_url):
             internet_reason = "blocked_domain"
             answer = (answer + "\n\nBloqueado: solo fuentes oficiales permitidas.").strip()
+        elif provided_url:
+            try:
+                web_answer, web_sources = _internet_fetch(provided_url, question)
+                internet_used = True
+                internet_reason = "rag_insufficient"
+                internet_sources = web_sources
+                citations = [{"n": 1, "url": provided_url}]
+                url_used = [provided_url]
+                answer = (answer + "\n\n" + web_answer + "\n\nFuentes oficiales consultadas:\n[1] " + provided_url).strip()
+            except Exception:
+                internet_reason = "no_official_results"
+                answer = (answer + "\n\nNo pude recuperar contenido de la URL oficial indicada.").strip()
         elif rag_sufficient:
             internet_reason = "rag_sufficient"
         else:
-            if provided_url:
-                try:
-                    web_answer, web_sources = _internet_fetch(provided_url, question)
-                    internet_used = True
-                    internet_reason = "rag_insufficient"
-                    internet_sources = web_sources
-                    citations = [{"n": 1, "url": provided_url}]
-                    url_used = [provided_url]
-                    answer = (answer + "\n\n" + web_answer + "\n\nFuentes oficiales consultadas:\n[1] " + provided_url).strip()
-                except Exception:
-                    internet_reason = "no_official_results"
-                    answer = (answer + "\n\nNo pude recuperar contenido de la URL oficial indicada.").strip()
+            area = inp.area or inp.collection
+            auto_answer, auto_sources, auto_reason, auto_urls, auto_citations = _search_official_sources(question, area)
+            internet_reason = auto_reason
+            if auto_sources:
+                internet_used = True
+                internet_sources = auto_sources
+                url_used = auto_urls
+                citations = auto_citations
+                answer = (answer + "\n\n" + auto_answer).strip()
             else:
-                area = inp.area or inp.collection
-                auto_answer, auto_sources, auto_reason, auto_urls, auto_citations = _search_official_sources(question, area)
-                internet_reason = auto_reason
-                if auto_sources:
-                    internet_used = True
-                    internet_sources = auto_sources
-                    url_used = auto_urls
-                    citations = auto_citations
-                    answer = (answer + "\n\n" + auto_answer).strip()
-                else:
-                    internet_used = False
-                    answer = (answer + "\n\n" + auto_answer).strip()
+                internet_used = False
+                answer = (answer + "\n\n" + auto_answer).strip()
 
     doc_type, template_id = _detect_template(question)
     extracted_fields = _extract_fields(inp.history or [], question)
