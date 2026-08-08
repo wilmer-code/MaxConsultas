@@ -48,11 +48,9 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
         "https://maxconsulta.com",
+        "https://www.maxconsulta.com",
         "https://app.maxconsulta.com",
-        "https://api.maxconsulta.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
