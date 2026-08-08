@@ -13,20 +13,33 @@ from fastapi.responses import FileResponse
 from openai import OpenAI
 from openpyxl import Workbook
 from pydantic import BaseModel
-from supabase import create_client
+from psycopg_pool import ConnectionPool
+from psycopg.rows import dict_row
+from pgvector.psycopg import register_vector
 from docx import Document
 
 load_dotenv()
 
-SUPABASE_URL = os.environ["SUPABASE_URL"].strip()
-SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"].strip()
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"].strip()
+DATABASE_URL = os.environ["DATABASE_URL"].strip()
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4.1-mini")
 TOP_K = int(os.getenv("TOP_K", "6"))
 
-sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+def _configure_conn(conn):
+    register_vector(conn)
+
+
+pool = ConnectionPool(
+    conninfo=DATABASE_URL,
+    min_size=1,
+    max_size=5,
+    kwargs={"row_factory": dict_row},
+    configure=_configure_conn,
+    open=True,
+)
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 app = FastAPI()
@@ -288,20 +301,23 @@ def embed_query(text: str):
 
 def retrieve_chunks(query_embedding, match_count: int, collection_name: str | None):
     """
-    IMPORTANTÍSIMO:
-    Para evitar el error PGRST203 (overloads), llamamos SIEMPRE
-    a match_chunks con la firma que incluye p_collection_name y p_storage_bucket.
+    Búsqueda por similitud vectorial en Postgres (pgvector).
+    Llama a la función SQL match_chunks(query_embedding, match_count,
+    p_collection_name, p_storage_bucket). p_storage_bucket se deja en None.
+    Devuelve lista de dicts con: id, document_id, title, content,
+    page_start, page_end, similarity.
     """
-    payload = {
-        "query_embedding": query_embedding,
-        "match_count": match_count,
-        "p_collection_name": collection_name,   # puede ser None
-        "p_storage_bucket": None,               # forzamos firma única
-    }
+    import numpy as np
 
-    res = sb.rpc("match_chunks", payload).execute()
+    vec = np.array(query_embedding, dtype=np.float32)
 
-    return res.data or []
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM match_chunks(%s, %s, %s, %s)",
+            (vec, match_count, collection_name, None),
+        ).fetchall()
+
+    return rows or []
 
 
 @app.post("/ask")

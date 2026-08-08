@@ -1,15 +1,21 @@
 import os, io, hashlib, time, gc, argparse, re
+from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 from pypdf import PdfReader
-from supabase import create_client
+import psycopg
+from psycopg.rows import dict_row
+from pgvector.psycopg import register_vector
+import numpy as np
 from openai import OpenAI
 
 load_dotenv()
 
-SUPABASE_URL = os.environ["SUPABASE_URL"].strip()
-SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"].strip()
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"].strip()
+DATABASE_URL = os.environ["DATABASE_URL"].strip()
+
+# Raíz local donde están los PDFs (una subcarpeta por colección)
+PDF_ROOT = Path(os.getenv("PDF_ROOT", "/home/dev/workspaces/MaxConsultas/data/pdfs"))
 
 # --- Ajustes embeddings ---
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
@@ -29,11 +35,18 @@ MAX_CHUNKS_PER_PAGE = int(os.getenv("MAX_CHUNKS_PER_PAGE", "200"))
 SLEEP_BETWEEN_PAGES = float(os.getenv("SLEEP_BETWEEN_PAGES", "0.0"))
 SLEEP_BETWEEN_EMBED_BATCHES = float(os.getenv("SLEEP_BETWEEN_EMBED_BATCHES", "0.0"))
 
-# Buckets a indexar (si no pasas --bucket)
-DEFAULT_BUCKETS = os.getenv("INDEX_BUCKETS", "loboral,fiscal,seguridad_social,boe,docs").split(",")
+# Colecciones a indexar (si no pasas --bucket). Si está vacío,
+# se autodetectan las subcarpetas de PDF_ROOT.
+_env_buckets = os.getenv("INDEX_BUCKETS", "").strip()
+DEFAULT_BUCKETS = [b.strip() for b in _env_buckets.split(",") if b.strip()] if _env_buckets else None
 
-sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 client = OpenAI(api_key=OPENAI_API_KEY)
+
+
+def get_conn():
+    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    register_vector(conn)
+    return conn
 
 
 def sha256_bytes(b: bytes) -> str:
@@ -98,74 +111,76 @@ def embed_texts(texts):
     return vectors
 
 
-def get_or_create_collection(name: str):
-    res = sb.table("collections").select("id").eq("name", name).execute().data
-    if res:
-        return res[0]["id"]
-    return sb.table("collections").insert({"name": name}).execute().data[0]["id"]
+def get_or_create_collection(conn, name: str):
+    row = conn.execute(
+        "SELECT id FROM collections WHERE name = %s", (name,)
+    ).fetchone()
+    if row:
+        return row["id"]
+    row = conn.execute(
+        "INSERT INTO collections (name) VALUES (%s) RETURNING id", (name,)
+    ).fetchone()
+    conn.commit()
+    return row["id"]
 
 
-def doc_chunks_count(doc_id: str) -> int:
-    resp = sb.table("chunks").select("id", count="exact").eq("document_id", doc_id).limit(1).execute()
-    return resp.count or 0
+def doc_chunks_count(conn, doc_id) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM chunks WHERE document_id = %s", (doc_id,)
+    ).fetchone()
+    return row["n"] or 0
 
 
-def upsert_document(bucket: str, path: str, collection_id: str, title: str, source: str, published_date, checksum: str):
-    existing = (
-        sb.table("documents")
-        .select("id,checksum")
-        .eq("storage_bucket", bucket)
-        .eq("storage_path", path)
-        .execute()
-        .data
-    )
+def upsert_document(conn, bucket: str, path: str, collection_id, title: str, source: str, published_date, checksum: str):
+    existing = conn.execute(
+        "SELECT id, checksum FROM documents WHERE storage_bucket = %s AND storage_path = %s",
+        (bucket, path),
+    ).fetchone()
 
     if existing:
-        doc_id = existing[0]["id"]
-        same_checksum = (existing[0].get("checksum") == checksum)
+        doc_id = existing["id"]
+        same_checksum = (existing["checksum"] == checksum)
 
         if same_checksum:
-            cnt = doc_chunks_count(doc_id)
+            cnt = doc_chunks_count(conn, doc_id)
             if cnt == 0:
                 print("Documento existe pero sin chunks. Forzando reindex...", flush=True)
                 return doc_id, False
             return doc_id, True
 
         # PDF cambió: borramos chunks y actualizamos doc
-        sb.table("chunks").delete().eq("document_id", doc_id).execute()
-        sb.table("documents").update(
-            {
-                "collection_id": collection_id,
-                "title": title,
-                "source": source,
-                "published_date": published_date,
-                "checksum": checksum,
-            }
-        ).eq("id", doc_id).execute()
+        conn.execute("DELETE FROM chunks WHERE document_id = %s", (doc_id,))
+        conn.execute(
+            """
+            UPDATE documents
+               SET collection_id = %s, title = %s, source = %s,
+                   published_date = %s, checksum = %s
+             WHERE id = %s
+            """,
+            (collection_id, title, source, published_date, checksum, doc_id),
+        )
+        conn.commit()
         return doc_id, False
 
-    doc = (
-        sb.table("documents")
-        .insert(
-            {
-                "collection_id": collection_id,
-                "title": title,
-                "source": source,
-                "published_date": published_date,
-                "storage_bucket": bucket,
-                "storage_path": path,
-                "checksum": checksum,
-            }
-        )
-        .execute()
-        .data[0]
-    )
-    return doc["id"], False
+    row = conn.execute(
+        """
+        INSERT INTO documents
+            (collection_id, title, source, published_date,
+             storage_bucket, storage_path, checksum)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (collection_id, title, source, published_date, bucket, path, checksum),
+    ).fetchone()
+    conn.commit()
+    return row["id"], False
 
 
 def download_pdf(bucket: str, path: str) -> bytes:
-    # descarga por SDK (con service role)
-    return sb.storage.from_(bucket).download(path)
+    # lectura local: PDF_ROOT/<bucket>/<path>
+    fpath = PDF_ROOT / bucket / path
+    with open(fpath, "rb") as f:
+        return f.read()
 
 
 def slug_to_title(filename: str) -> str:
@@ -178,28 +193,39 @@ def slug_to_title(filename: str) -> str:
 
 def list_pdf_files(bucket: str):
     """
-    Lista archivos del bucket (nivel raíz). Si luego usas carpetas, te lo adapto.
+    Lista los PDFs de la subcarpeta local PDF_ROOT/<bucket>.
     """
-    items = sb.storage.from_(bucket).list()
-    pdfs = []
-    for it in items:
-        name = it.get("name")
-        if name and name.lower().endswith(".pdf"):
-            pdfs.append(name)
+    folder = PDF_ROOT / bucket
+    if not folder.is_dir():
+        return []
+    pdfs = [p.name for p in folder.iterdir() if p.suffix.lower() == ".pdf"]
     return sorted(pdfs)
 
 
-def index_pdf_from_storage(bucket: str, path: str, collection_name: str, title: str, source: str, published_date=None):
+def list_collections():
+    """
+    Autodetecta las colecciones = subcarpetas de PDF_ROOT que contienen PDFs.
+    """
+    if not PDF_ROOT.is_dir():
+        return []
+    cols = []
+    for p in sorted(PDF_ROOT.iterdir()):
+        if p.is_dir() and any(f.suffix.lower() == ".pdf" for f in p.iterdir()):
+            cols.append(p.name)
+    return cols
+
+
+def index_pdf_from_storage(conn, bucket: str, path: str, collection_name: str, title: str, source: str, published_date=None):
     t0 = time.time()
 
     pdf_bytes = download_pdf(bucket, path)
     print(f"\n==> {bucket}/{path}", flush=True)
-    print("Descargado OK. Bytes:", len(pdf_bytes), flush=True)
+    print("Leído OK. Bytes:", len(pdf_bytes), flush=True)
 
     checksum = sha256_bytes(pdf_bytes)
 
-    collection_id = get_or_create_collection(collection_name)
-    doc_id, already = upsert_document(bucket, path, collection_id, title, source, published_date, checksum)
+    collection_id = get_or_create_collection(conn, collection_name)
+    doc_id, already = upsert_document(conn, bucket, path, collection_id, title, source, published_date, checksum)
     if already:
         print("Documento ya indexado (sin cambios).", flush=True)
         return
@@ -240,20 +266,30 @@ def index_pdf_from_storage(bucket: str, path: str, collection_name: str, title: 
         batch_rows = []
         for chunk, vec in zip(chunks, vectors):
             batch_rows.append(
-                {
-                    "document_id": doc_id,
-                    "chunk_index": chunk_counter,
-                    "page_start": page_num,
-                    "page_end": page_num,
-                    "section": None,
-                    "content": chunk,
-                    "embedding": vec,
-                }
+                (
+                    doc_id,
+                    chunk_counter,
+                    page_num,
+                    page_num,
+                    None,
+                    chunk,
+                    np.array(vec, dtype=np.float32),
+                )
             )
             chunk_counter += 1
 
         for i in range(0, len(batch_rows), INSERT_BATCH):
-            sb.table("chunks").insert(batch_rows[i:i + INSERT_BATCH]).execute()
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO chunks
+                        (document_id, chunk_index, page_start, page_end,
+                         section, content, embedding)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    batch_rows[i:i + INSERT_BATCH],
+                )
+            conn.commit()
 
         inserted_total += len(batch_rows)
         print(f"  - insert OK (total_inserted={inserted_total})", flush=True)
@@ -276,29 +312,41 @@ def main():
     parser.add_argument("--source", default="manual", help="source para documents (default: manual)")
     args = parser.parse_args()
 
-    buckets = [args.bucket] if args.bucket else [b.strip() for b in DEFAULT_BUCKETS if b.strip()]
+    if args.bucket:
+        buckets = [args.bucket]
+    elif DEFAULT_BUCKETS:
+        buckets = DEFAULT_BUCKETS
+    else:
+        buckets = list_collections()
 
-    for bucket in buckets:
-        # collection_name = el mismo bucket (puedes cambiarlo si quieres)
-        collection_name = bucket
+    print(f"Colecciones a indexar: {buckets}", flush=True)
 
-        if args.file:
-            files = [args.file]
-        else:
-            print(f"\n--- Listando PDFs de bucket: {bucket} ---", flush=True)
-            files = list_pdf_files(bucket)
-            print(f"Encontrados: {len(files)} PDFs", flush=True)
+    conn = get_conn()
+    try:
+        for bucket in buckets:
+            # collection_name = el nombre de la subcarpeta
+            collection_name = bucket
 
-        for path in files:
-            title = slug_to_title(path)
-            index_pdf_from_storage(
-                bucket=bucket,
-                path=path,
-                collection_name=collection_name,
-                title=title,
-                source=args.source,
-                published_date=None,
-            )
+            if args.file:
+                files = [args.file]
+            else:
+                print(f"\n--- Listando PDFs de: {bucket} ---", flush=True)
+                files = list_pdf_files(bucket)
+                print(f"Encontrados: {len(files)} PDFs", flush=True)
+
+            for path in files:
+                title = slug_to_title(path)
+                index_pdf_from_storage(
+                    conn,
+                    bucket=bucket,
+                    path=path,
+                    collection_name=collection_name,
+                    title=title,
+                    source=args.source,
+                    published_date=None,
+                )
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

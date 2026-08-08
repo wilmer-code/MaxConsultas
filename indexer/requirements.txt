@@ -5,3 +5,9 @@ python-docx
 openpyxl
 requests
 beautifulsoup4
+openai
+pypdf
+psycopg[binary]
+psycopg-pool
+pgvector
+numpy
