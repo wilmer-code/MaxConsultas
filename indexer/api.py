@@ -7,7 +7,7 @@ from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from openai import OpenAI
@@ -26,6 +26,7 @@ DATABASE_URL = os.environ["DATABASE_URL"].strip()
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4.1-mini")
 TOP_K = int(os.getenv("TOP_K", "6"))
+UPLOAD_PIN = os.getenv("UPLOAD_PIN", "").strip()
 
 
 def _configure_conn(conn):
@@ -1024,3 +1025,115 @@ def download_spreadsheet(sheet_id: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=f"{sheet_id}.xlsx",
     )
+
+
+# ============================================================
+# ENDPOINT: subir PDF + indexar (síncrono, protegido por PIN)
+# ============================================================
+import re as _re_upload
+import unicodedata as _ud_upload
+import index_from_storage as idx
+
+
+def _slugify_collection(name: str) -> str:
+    name = (name or "").strip()
+    name = _ud_upload.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    name = _re_upload.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_")
+    return name
+
+
+def _safe_filename(name: str) -> str:
+    from pathlib import Path as _P
+    base = _P(name).name
+    base = _ud_upload.normalize("NFKD", base).encode("ascii", "ignore").decode("ascii")
+    base = _re_upload.sub(r"[^A-Za-z0-9_.\-]+", "_", base)
+    if not base.lower().endswith(".pdf"):
+        base += ".pdf"
+    return base
+
+
+@app.post("/upload")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    coleccion: str = Form(...),
+    x_upload_pin: str = Header(None),
+):
+    if not UPLOAD_PIN or x_upload_pin != UPLOAD_PIN:
+        raise HTTPException(status_code=401, detail="PIN incorrecto o ausente.")
+
+    col = _slugify_collection(coleccion)
+    if not col:
+        raise HTTPException(status_code=400, detail="Coleccion invalida.")
+
+    fname = _safe_filename(file.filename or "documento.pdf")
+    ctype = (file.content_type or "").lower()
+    if "pdf" not in ctype and not fname.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF.")
+
+    MAX_BYTES = 20 * 1024 * 1024
+    data = await file.read()
+    if len(data) == 0:
+        raise HTTPException(status_code=400, detail="El archivo esta vacio.")
+    if len(data) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"El archivo supera 20 MB (tiene {len(data)//(1024*1024)} MB).")
+
+    dest_dir = idx.PDF_ROOT / col
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / fname
+    with open(dest_path, "wb") as f:
+        f.write(data)
+
+    try:
+        conn = idx.get_conn()
+        try:
+            title = idx.slug_to_title(fname)
+            idx.index_pdf_from_storage(
+                conn,
+                bucket=col,
+                path=fname,
+                collection_name=col,
+                title=title,
+                source="upload_web",
+                published_date=None,
+            )
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM chunks c
+                JOIN documents d ON d.id = c.document_id
+                WHERE d.storage_bucket = %s AND d.storage_path = %s
+                """,
+                (col, fname),
+            ).fetchone()
+            n_chunks = row["n"] if row else 0
+        finally:
+            conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al indexar: {e}")
+
+    return {
+        "ok": True,
+        "mensaje": "reindexado se realizo correctamente",
+        "coleccion": col,
+        "archivo": fname,
+        "chunks": n_chunks,
+    }
+
+
+# ============================================================
+# ENDPOINT: listar colecciones reales (para pestañas dinámicas)
+# ============================================================
+@app.get("/colecciones")
+def listar_colecciones():
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.name, COUNT(d.id) AS docs
+            FROM collections c
+            LEFT JOIN documents d ON d.collection_id = c.id
+            GROUP BY c.name
+            HAVING COUNT(d.id) > 0
+            ORDER BY c.name
+            """
+        ).fetchall()
+    return {"colecciones": [{"name": r["name"], "docs": r["docs"]} for r in rows]}

@@ -150,7 +150,5 @@
       <span class="muted">Asistente Max · uso interno</span>
     </footer>
   </div>
-  <script src="./upload_widget.js?v=1" defer></script>
-  <script src="./areas_dinamicas.js?v=1" defer></script>
 </body>
 </html>
